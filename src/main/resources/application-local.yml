@@ -1,0 +1,96 @@
+server.max-http-header-size: 65536
+server.port: 8080
+management:
+  server.port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+logging:
+  level:
+    root: WARN
+    #com.netflix: WARN
+    #org.springframework: WARN
+    #org.apache: WARN
+    #com.zaxxer: WARN
+    #org.hibernate: WARN
+    #liquibase: WARN
+    #io.jaegertracing: WARN
+    org.springframework.security: INFO
+    org.springframework.http: INFO
+    com.abcfinancial: DEBUG
+opentracing:
+  jaeger:
+    logSpans: false
+datasource:
+  schema: 'organization'
+  host: '${dockerdbhost:localhost}:3306'
+  url: 'jdbc:mysql://${datasource.host}/${datasource.schema}'
+  username: 'developer'
+  password: ''
+spring:
+  jpa:
+    database-platform: org.hibernate.dialect.MySQL57Dialect
+    open-in-view: false
+    hibernate.ddl-auto: none
+    hibernate.naming.implicit-strategy: org.hibernate.boot.model.naming.ImplicitNamingStrategyLegacyJpaImpl
+    hibernate.naming.physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+    properties:
+      hibernate.connection.provider_disables_autocommit: true
+      hibernate.connection.handling_mode: DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION
+      hibernate.jdbc.time_zone: UTC
+      hibernate.dialect: org.hibernate.dialect.MySQL57Dialect
+      hibernate.show_sql: true
+      hibernate.format_sql: true
+      hibernate.type: trace
+      hibernate.globally_quoted_identifiers: true
+      hibernate.temp.use_jdbc_metadata_defaults: false
+  datasource:
+    name: 'CommerceExportLocation'
+    driver-class-name: software.aws.rds.jdbc.mysql.Driver
+    url: '${datasource.url}?noAccessToProcedureBodies=true&sessionVariables=max_execution_time=60000&socketTimeout=60000'
+    replica:
+      url: '${datasource.url}?noAccessToProcedureBodies=true&relaxAutoCommit=true&sessionVariables=max_execution_time=60000&socketTimeout=60000'
+      hikari:
+        enable: false
+        pool-name: 'Replica read-only Pool'
+        maximum-pool-size: 10
+        minimumIdle: 2
+        idleTimeout: 600000
+        keepaliveTime: 120000
+        maxLifetime: 590000
+        auto-commit: false
+    username: '${datasource.username}'
+    password: '${datasource.password}'
+    hikari:
+      transaction-isolation: 2 # TRANSACTION_READ_COMMITTED
+      maximum-pool-size: 22
+      auto-commit: false
+    ldap:
+      urls: [ 'ldap://slrdz001.abcfinancial.net', 'ldap://slrdz002.abcfinancial.net' ]
+      username: 'PLACEHOLDER_USERNAME'
+      password: 'PLACEHOLDER_PASSWORD'
+  task.scheduling.pool.size: 3
+
+security:
+  oauth2:
+    client:
+      client-id: 'AUTOMATED_TESTING'
+      client-secret: 't3st@llth3th1ngs'
+    resource:
+      jwt:
+        # key-uri: 'http://localhost:8380/tokenKey'
+        key-value: 'local_signing_key'
+abcfinancial:
+  tenancy:
+    required: false
+  security:
+    hierarchy:
+      scopePattern: '*:admin > *:protected > *:delete > *:create > *:write > *:read'
+      authorityPattern: |
+        *:client-admin > *:client-protected > *:client-delete > *:client-create > *:client-write > *:client-read
+        *:admin > *:protected > *:delete > *:create > *:write > *:read
+  features:
+    - key: transaction-routing
+      enabled: true
+      requiresReboot: true

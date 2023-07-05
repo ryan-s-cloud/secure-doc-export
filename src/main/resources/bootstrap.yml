@@ -1,0 +1,18 @@
+spring:
+  application.name: 'secure-doc-export'
+  profiles.active: 'local'
+  cloud:
+    config:
+      enabled: false
+      uri: 'http://dc01dcloudconfig.abcfinancial.net/'
+    vault:
+      enabled: false
+logging:
+  level:
+    com.abcfinancial: DEBUG
+    com.netflix: INFO
+    org.springframework: INFO
+    org.apache: INFO
+    com.zaxxer: INFO
+    org.hibernate: DEBUG
+    liquibase: INFO

@@ -1,0 +1,222 @@
+import com.github.jk1.license.filter.LicenseBundleNormalizer
+import com.github.jk1.license.render.JsonReportRenderer
+
+import java.text.SimpleDateFormat
+
+buildscript {
+    repositories {
+        maven { url 'https://artifactory.abc30ops.com/artifactory/gradle-plugins-mirror' }
+        maven { url "https://artifactory.abc30ops.com/artifactory/repo" }
+        maven { url "https://repo.spring.io/snapshot" }
+        maven { url "https://repo.spring.io/milestone" }
+        mavenCentral()
+    }
+    dependencies {
+        classpath "org.springframework.boot:spring-boot-gradle-plugin:$springBootVersion"
+        classpath "org.asciidoctor:asciidoctor-gradle-jvm:$asciidoctorVersion"
+        classpath 'com.github.jk1:gradle-license-report:1.16'
+    }
+}
+
+plugins {
+    id 'java-library'
+    id 'groovy'
+    id 'jacoco'
+    id 'org.sonarqube' version '3.1.1'
+    id 'org.springframework.boot' version "$springBootVersion"
+    id 'io.spring.dependency-management' version '1.1.0'
+    id 'org.asciidoctor.jvm.convert' version "$asciidoctorVersion"
+}
+
+apply plugin: 'com.github.jk1.dependency-license-report'
+
+def revision = 'git rev-parse HEAD'.execute().text.trim()
+def branch = 'git rev-parse --abbrev-ref HEAD'.execute().text.trim()
+
+group = projectGroup
+def archVersion = "${new Date().format('yyyy')}.${new Date().format('MM')}.${'git rev-parse --short=8 HEAD'.execute().text.trim()}"
+version = archVersion
+sourceCompatibility = projectSourceCompatibility
+
+repositories {
+    maven { url "https://artifactory.abc30ops.com/artifactory/repo" }
+    maven { url "https://repo.spring.io/snapshot" }
+    maven { url "https://repo.spring.io/milestone" }
+}
+
+jar {
+    archiveVersion = archVersion
+    enabled = false
+}
+
+ext {
+    javadocJsonDir = file("$buildDir/generated-javadoc-json")
+    docSnippetsDir = file("$buildDir/generated-snippets")
+    docHomeDir = file("$projectDir/src/docs/asciidoc")
+}
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+
+    jsondoclet
+    asciidoctorExt
+    // We don't need actuator during tests because their autoconfiguration slows Spring context loading (and therefore tests) down
+    testCompile.exclude group: "org.springframework.boot", module: "spring-boot-starter-actuator"
+}
+
+configurations.configureEach {
+    exclude group: "commons-logging", module: "commons-logging"
+}
+
+dependencies {
+    compileOnly('org.projectlombok:lombok')
+    annotationProcessor 'org.projectlombok:lombok'
+
+    api('com.abcfinancial.api:common-core:53.7.0') {
+        exclude group: 'org.liquibase', module: 'liquibase-core'
+        exclude group: 'org.quartz-scheduler', module: 'quartz'
+    }
+    api 'org.springframework.cloud:spring-cloud-openfeign-core:2.2.10.RELEASE'
+    api 'org.apache.commons:commons-csv:1.8'
+    api 'org.springframework.boot:spring-boot-starter-integration'
+    api('org.springframework.boot:spring-boot-starter-batch')
+    {
+        exclude group: 'org.springframework.batch', module: 'spring-batch-core'
+        exclude group: 'org.springframework.batch', module: 'spring-batch-integration'
+    }
+    api 'org.springframework.boot:spring-boot-starter-webflux:2.6.4'
+    implementation 'org.springframework.boot:spring-boot-starter-data-ldap'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-xml'
+    implementation 'org.apache.commons:commons-lang3'
+    implementation 'software.aws.rds:aws-mysql-jdbc:1.1.7'
+    implementation 'software.amazon.awssdk:rds'
+    implementation 'com.fasterxml.jackson.module:jackson-module-jaxb-annotations'
+    implementation 'org.apache.commons:commons-compress:1.22'
+
+    testImplementation 'org.mockito:mockito-core:5.3.1'
+
+    testImplementation 'org.springframework.cloud:spring-cloud-starter-contract-stub-runner'
+    testImplementation 'com.abcfinancial.api:common-unit-test:37.2.0'
+    testImplementation 'nl.jqno.equalsverifier:equalsverifier:3.0.3'
+    testImplementation 'org.springframework.cloud:spring-cloud-contract-wiremock'
+
+    testImplementation "org.springframework.restdocs:spring-restdocs-mockmvc:$springRestDocVersion"
+    jsondoclet 'capital.scalable:spring-auto-restdocs-json-doclet-jdk9:2.0.11'
+    asciidoctorExt "org.springframework.restdocs:spring-restdocs-asciidoctor:$springRestDocVersion"
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.boot:spring-boot-dependencies:${springBootVersion}"
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+        mavenBom "software.amazon.awssdk:bom:$awsSdkVersion"
+    }
+}
+
+tasks.register('jsonDoclet', Javadoc) {
+    dependsOn compileJava
+    options.encoding = 'UTF-8'
+    source = sourceSets.main.allJava
+    classpath = sourceSets.main.compileClasspath
+    destinationDir = javadocJsonDir
+    options.docletpath = configurations.jsondoclet.files as List
+    options.doclet = 'capital.scalable.restdocs.jsondoclet.ExtractDocumentationAsJsonDoclet'
+    options.memberLevel = JavadocMemberLevel.PACKAGE
+}
+
+test {
+    dependsOn jsonDoclet
+    finalizedBy jacocoTestReport
+    useTestNG()
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'org.springframework.restdocs.outputDir', docSnippetsDir
+    systemProperty 'org.springframework.restdocs.javadocJsonDir', javadocJsonDir
+    systemProperty 'abc.docker.registry.url', 'artifactory.abc30ops.com/docker-mirror'
+    environment 'DOCKER_CONFIG', './src/test/resources/docker'
+    minHeapSize '3g'
+    maxHeapSize '3g'
+}
+
+licenseReport {
+    allowedLicensesFile = new File("$projectDir/src/main/resources/licenses/allowed-licenses.json")
+    renderers = new JsonReportRenderer('license-details.json', false)
+    filters = [new LicenseBundleNormalizer()]
+}
+
+jacocoTestReport {
+    dependsOn asciidoctor
+    reports {
+        xml.enabled true
+    }
+}
+
+javadoc {
+    options.encoding = "UTF-8"
+}
+
+asciidoctor {
+    dependsOn test
+    options.encoding = "UTF-8"
+    outputOptions {
+        separateOutputDirs = false
+    }
+    attributes 'snippets': docSnippetsDir
+    attributes 'source-highlighter': 'hightlightjs'
+    baseDir file("${projectDir}/src/docs/asciidoc")
+    configurations 'asciidoctorExt'
+}
+
+bootJar {
+    dependsOn asciidoctor
+    from("${asciidoctor.outputDir}") {
+        into 'static/docs'
+    }
+    manifest {
+        attributes "Built-By": System.properties['user.name']
+        attributes "Build-Timestamp": new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ").format(new Date())
+        attributes "Created-By": "Gradle ${gradle.gradleVersion}"
+        attributes "Build-Jdk": "${System.properties['java.version']} (${System.properties['java.vendor']} ${System.properties['java.vm.version']})"
+        attributes "Build-OS": "${System.properties['os.name']} ${System.properties['os.arch']} ${System.properties['os.version']}"
+        attributes "Build-Revision": revision
+        attributes "Build-Branch": branch
+        attributes "Package": projectGroup
+        attributes "Name": projectName
+        attributes "Specification-Title": 'Spring Cloud Microservice'
+        attributes "Specification-Version": "$springBootVersion/$springCloudVersion"
+        attributes "Specification-Vendor": 'Pivotal Software, Inc.'
+        attributes "Implementation-Version": archVersion
+        attributes "Implementation-Vendor": projectVendor
+        attributes "Implementation-Title": projectGroup
+    }
+}
+
+springBoot {
+    buildInfo {
+        properties {
+            additional = [
+                    'revision': revision,
+                    'branch'  : branch
+            ]
+        }
+    }
+}
+
+/*
+//??? why is it needed
+hibernate {
+    enhance {
+        enableLazyInitialization = true
+    }
+}
+ */
+
+sonarqube {
+    properties {
+        property 'sonar.coverage.exclusions', '**/com/abcfitness/exportdata/csv/repository/**,'
+        property 'sonar.issue.ignore.multicriteria', 'service_types'
+        property 'sonar.issue.ignore.multicriteria.service_types.ruleKey', 'java:S1452'
+        property 'sonar.issue.ignore.multicriteria.service_types.resourceKey', '**/com/abcfinancial/**/*'
+    }
+}
